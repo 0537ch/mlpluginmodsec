@@ -3,9 +3,10 @@ Description=ML Model Server for ModSecurity
 After=network.target
 
 [Service]
+Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/path/to/ml_model_server
+WorkingDirectory=/home/vboxuser/Downloads/mlpluginmodsec/ml_model_server
 ExecStart=/usr/bin/python3 placeholder.py
 Restart=always
 RestartSec=3
