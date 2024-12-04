@@ -15,18 +15,89 @@ import re
 class SQLInjectionDetector:
     def __init__(self, model_params=None):
         """
-        Inisialisasi detector dengan parameter model yang bisa dikustomisasi
+        Initialize detector with custom model parameters and versioning
         """
         self.model_params = model_params if model_params else {
-            'n_estimators': 200,        # Jumlah trees
-            'max_depth': 15,            # Kedalaman maksimum
-            'min_samples_split': 10,    # Minimum samples untuk split
-            'class_weight': 'balanced', # Handle imbalanced classes
+            'n_estimators': 200,
+            'max_depth': 15,
+            'min_samples_split': 10,
+            'class_weight': 'balanced',
             'random_state': 42
         }
-        self.model = RandomForestClassifier(**self.model_params)
-        self.vectorizer = CountVectorizer(max_features=100, stop_words='english')
+        self.model = None
+        self.vectorizer = None
+        self.model_version = None
+        self.last_reload_time = None
+        self.reload_interval = 3600  # Reload model every hour
+        self._load_or_create_model()
         
+    def _load_or_create_model(self):
+        """
+        Load existing model or create new one with versioning
+        """
+        model_path = 'sql_injection_detector.pkl'
+        vectorizer_path = 'vectorizer.pkl'
+        version_path = 'model_version.txt'
+        
+        try:
+            # Check if model exists and is recent
+            if (os.path.exists(model_path) and 
+                os.path.exists(vectorizer_path) and 
+                os.path.exists(version_path)):
+                
+                # Load version info
+                with open(version_path, 'r') as f:
+                    saved_version = f.read().strip()
+                
+                # Load model and vectorizer
+                with open(model_path, 'rb') as f:
+                    self.model = pickle.load(f)
+                with open(vectorizer_path, 'rb') as f:
+                    self.vectorizer = pickle.load(f)
+                
+                self.model_version = saved_version
+                self.last_reload_time = datetime.now()
+                print(f"Loaded model version: {saved_version}")
+            else:
+                # Initialize new model
+                self.model = RandomForestClassifier(**self.model_params)
+                self.vectorizer = CountVectorizer(max_features=100, stop_words='english')
+                self.model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
+                print("Initialized new model")
+        except Exception as e:
+            print(f"Error loading model: {str(e)}")
+            # Fallback to new model
+            self.model = RandomForestClassifier(**self.model_params)
+            self.vectorizer = CountVectorizer(max_features=100, stop_words='english')
+            self.model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    def save_model(self):
+        """
+        Save model with version information
+        """
+        try:
+            # Save model and vectorizer
+            with open('sql_injection_detector.pkl', 'wb') as f:
+                pickle.dump(self.model, f)
+            with open('vectorizer.pkl', 'wb') as f:
+                pickle.dump(self.vectorizer, f)
+            
+            # Save version info
+            with open('model_version.txt', 'w') as f:
+                f.write(self.model_version)
+            
+            print(f"Saved model version: {self.model_version}")
+        except Exception as e:
+            print(f"Error saving model: {str(e)}")
+    
+    def check_reload_model(self):
+        """
+        Check if model needs reloading
+        """
+        if (self.last_reload_time and 
+            (datetime.now() - self.last_reload_time).total_seconds() > self.reload_interval):
+            self._load_or_create_model()
+            
     def extract_sql_features(self, query):
         """
         Ekstrak fitur spesifik untuk SQL Injection detection
@@ -404,14 +475,13 @@ def main():
     print("Training model...")
     detector.train(X_train_prepared, y_train)
     
+    # Save model
+    print("Saving model...")
+    detector.save_model()
+    
     # Evaluate
     print("Evaluating model...")
     report, cm, feature_importance = detector.evaluate(X_test_prepared, y_test, output_dir)
-    
-    # Save model
-    print("Saving model...")
-    with open(os.path.join(output_dir, 'sql_injection_detector.pkl'), 'wb') as f:
-        pickle.dump(detector, f)
     
     print(f"\nTraining completed! Results saved in: {output_dir}")
     print("\nClassification Report:")
