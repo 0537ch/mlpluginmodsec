@@ -48,7 +48,8 @@ class MLServer:
         
     def load_model(self):
         try:
-            pkl_filename = 'sql_injection_detector.pkl'
+            # Update path to where your .pkl file is actually located
+            pkl_filename = '/home/vboxuser/Downloads/mlpluginmodsec/sql_injection_detector.pkl'
             with open(pkl_filename, 'rb') as file:
                 self.model = pickle.load(file)
             logger.info("Model loaded successfully")
