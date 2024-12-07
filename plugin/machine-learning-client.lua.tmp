@@ -1,5 +1,0 @@
--- Minimal ModSecurity Lua plugin
-function main()
-    -- Return immediately to test if Lua loading works
-    return nil
-end
