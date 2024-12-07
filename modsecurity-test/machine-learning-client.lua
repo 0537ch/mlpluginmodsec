@@ -8,7 +8,7 @@ function debug_log(message)
         end)
         if not ok then
             -- If ModSecurity logging fails, try writing to a file
-            local f = io.open("/tmp/modsec_lua_debug.log", "a")
+            local f = io.open("/var/log/apache2/modsec_lua_debug.log", "a")
             if f then
                 f:write(os.date("%Y-%m-%d %H:%M:%S") .. " ERROR: " .. tostring(err) .. "\n")
                 f:close()
