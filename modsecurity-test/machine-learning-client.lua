@@ -1,17 +1,22 @@
 -- Test basic request variables
 function main()
-    -- Get ModSecurity object safely
+    -- Basic initialization check
     if not _G['m'] then
         return nil
     end
 
-    -- Try to read variables that were set in config
-    local uri = _G['m'].getvar("TX.request_uri")
-    local method = _G['m'].getvar("TX.method")
+    -- Try to log something basic first
+    _G['m'].log(4, "Lua script started")
     
-    -- Log what we got
-    if uri and method then
-        _G['m'].log(4, "Processing " .. method .. " request to " .. uri)
+    -- Try to get just one variable with pcall
+    local ok, uri = pcall(function() 
+        return _G['m'].getvar("TX.request_uri")
+    end)
+    
+    if ok and uri then
+        _G['m'].log(4, "Got URI: " .. tostring(uri))
+    else
+        _G['m'].log(4, "Failed to get URI")
     end
 
     return nil
