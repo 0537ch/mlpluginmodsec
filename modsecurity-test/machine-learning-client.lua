@@ -1,23 +1,15 @@
--- Test basic request variables
+-- Minimal test script
 function main()
-    -- Basic initialization check
-    if not _G['m'] then
+    -- Check if we have access to m object
+    if _G['m'] == nil then
         return nil
     end
-
-    -- Try to log something basic first
-    _G['m'].log(4, "Lua script started")
     
-    -- Try to get just one variable with pcall
-    local ok, uri = pcall(function() 
-        return _G['m'].getvar("TX.request_uri")
+    -- Try basic logging only
+    local ok, err = pcall(function()
+        _G['m'].log(4, "Basic test log message")
     end)
     
-    if ok and uri then
-        _G['m'].log(4, "Got URI: " .. tostring(uri))
-    else
-        _G['m'].log(4, "Failed to get URI")
-    end
-
+    -- Don't try to access any variables yet
     return nil
 end
