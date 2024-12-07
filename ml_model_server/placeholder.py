@@ -13,15 +13,13 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from functools import partial
 import signal
 import gc
+import numpy as np
+import joblib
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('ml_server.log'),
-        logging.StreamHandler()
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
@@ -53,7 +51,7 @@ class MLServer:
             pkl_filename = os.path.join(current_dir, 'sql_injection_detector.pkl')
             with open(pkl_filename, 'rb') as file:
                 self.model = pickle.load(file)
-            logger.info("Model loaded successfully")
+            logger.info(f"Model loaded successfully from {pkl_filename}")
         except Exception as e:
             logger.error(f"Error loading model: {str(e)}")
             raise
@@ -95,6 +93,7 @@ def process_request(form_data):
         # Force garbage collection after prediction
         gc.collect()
         
+        logger.info(f"Prediction result: {score}")
         return str(score), 200 if score > 0 else 401
         
     except Exception as e:
@@ -107,10 +106,11 @@ def health_check():
     try:
         # Basic model validation
         test_prediction = ml_server.predict(["SELECT * FROM users"])
+        memory_usage = psutil.Process(pid).memory_info().rss / 1024 / 1024  # MB
         return jsonify({
             "status": "healthy",
             "model_loaded": ml_server.model is not None,
-            "memory_usage_mb": psutil.Process(pid).memory_info().rss / 1024 / 1024
+            "memory_usage_mb": f"{memory_usage:.2f}"
         })
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
