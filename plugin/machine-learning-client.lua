@@ -1,6 +1,32 @@
 -- Machine Learning Client for ModSecurity
 -- Memory-safe implementation with proper cleanup
 
+-- Initialize ModSecurity API with method checking
+local m = {}
+if _G.m then
+    -- Check required methods
+    local required_methods = {"log", "getvar", "getvars", "setvar"}
+    local missing_methods = {}
+    
+    for _, method in ipairs(required_methods) do
+        if type(_G.m[method]) ~= "function" then
+            table.insert(missing_methods, method)
+        end
+    end
+    
+    if #missing_methods > 0 then
+        -- Log error and return if methods are missing
+        if type(_G.m.log) == "function" then
+            _G.m.log(1, "[ML-Plugin Error] Missing required methods: " .. table.concat(missing_methods, ", "))
+        end
+        return nil
+    end
+    
+    m = _G.m
+else
+    return nil
+end
+
 -- Lua 5.3 compatibility layer
 local unpack = table.unpack or unpack
 local loadstring = loadstring or load
@@ -25,39 +51,154 @@ if not (http and ltn12 and cjson) then
     return
 end
 
--- Configuration with version-specific adjustments
+-- Configuration
 local ML_SERVER_URL = "http://localhost:5000"
 local TIMEOUT = 1  -- seconds
 local MAX_REQUEST_SIZE = 512 * 1024  -- 512KB
 local MAX_ARGS = 50
 local MAX_STRING_LENGTH = 4096
+local MAX_PATTERNS = 100  -- Maximum number of patterns to collect
+local MAX_PATTERN_LENGTH = 1024  -- Maximum length of each pattern
 local DEBUG = true
 
--- Utility functions for memory-safe operations
-local function log_debug(msg, level)
-    level = level or 1  -- Default to info level
-    if DEBUG then
-        local debug_levels = {
-            [1] = "INFO",
-            [2] = "WARNING",
-            [3] = "ERROR"
-        }
-        local timestamp = os.date("%Y-%m-%d %H:%M:%S")
-        local level_str = debug_levels[level] or "INFO"
-        m.log(level, string.format("[ML-Plugin %s] [%s] %s", level_str, timestamp, tostring(msg)))
+-- Basic utility functions
+local function safe_string(str, max_len)
+    if not str then return "" end
+    if type(str) ~= "string" then
+        str = tostring(str)
     end
+    max_len = max_len or MAX_STRING_LENGTH
+    return string.sub(str, 1, max_len)
 end
 
--- Memory monitoring
+-- Debug logging with protected string operations
+local function log_debug(msg, level)
+    if not DEBUG then return end
+    
+    level = level or 1
+    local debug_levels = {
+        [1] = "INFO",
+        [2] = "WARNING",
+        [3] = "ERROR"
+    }
+    
+    local ok, timestamp = pcall(os.date, "%Y-%m-%d %H:%M:%S")
+    if not ok then timestamp = "unknown_time" end
+    
+    local level_str = debug_levels[level] or "INFO"
+    local log_msg = string.format("[ML-Plugin %s] [%s] %s", 
+        level_str,
+        timestamp,
+        safe_string(tostring(msg))
+    )
+    
+    pcall(m.log, level, log_msg)
+end
+
+-- Memory monitoring with error handling
 local function get_memory_usage()
-    local file = io.open("/proc/self/status", "r")
-    if not file then return "unknown" end
+    local ok, file = pcall(io.open, "/proc/self/status", "r")
+    if not ok or not file then 
+        return "memory_unknown"
+    end
+    
     local content = file:read("*all")
     file:close()
     
+    if not content then
+        return "memory_read_failed"
+    end
+    
     local vm_peak = content:match("VmPeak:%s*(%d+)")
     local vm_size = content:match("VmSize:%s*(%d+)")
-    return string.format("VmPeak: %sKB, VmSize: %sKB", vm_peak or "unknown", vm_size or "unknown")
+    
+    return string.format("VmPeak: %sKB, VmSize: %sKB", 
+        vm_peak or "unknown", 
+        vm_size or "unknown"
+    )
+end
+
+-- Extract SQL patterns from request with memory protection
+local function extract_sql_patterns()
+    local patterns = {}
+    local pattern_count = 0
+    
+    -- Function to safely add pattern
+    local function add_pattern(pattern)
+        if pattern_count >= MAX_PATTERNS then
+            log_debug("Maximum pattern limit reached", 2)
+            return false
+        end
+        
+        if type(pattern) == "string" and #pattern > 0 then
+            local safe_pattern = safe_string(pattern, MAX_PATTERN_LENGTH)
+            table.insert(patterns, safe_pattern)
+            pattern_count = pattern_count + 1
+            return true
+        end
+        return false
+    end
+    
+    -- Check ARGS with pcall
+    local ok, args = pcall(m.getvars, "ARGS", "")
+    if ok and args then
+        for _, arg in ipairs(args) do
+            if arg.value and type(arg.value) == "string" and #arg.value > 0 then
+                log_debug("Checking ARGS: " .. safe_string(arg.name) .. "=" .. safe_string(arg.value))
+                if not add_pattern(arg.value) then
+                    break
+                end
+            end
+        end
+    end
+    
+    -- Check REQUEST_URI with pcall
+    local ok_uri, uri = pcall(m.getvar, "REQUEST_URI")
+    if ok_uri and uri and pattern_count < MAX_PATTERNS then
+        log_debug("Checking URI: " .. safe_string(uri))
+        add_pattern(uri)
+    end
+    
+    return patterns
+end
+
+-- Simple pattern matching for SQL injection with optimized patterns
+local function check_sql_pattern(pattern)
+    if not pattern or type(pattern) ~= "string" then
+        return false, 0
+    end
+    
+    -- Convert to lowercase for case-insensitive matching
+    local ok, lower_pattern = pcall(string.lower, pattern)
+    if not ok then
+        log_debug("Failed to convert pattern to lowercase", 2)
+        return false, 0
+    end
+    
+    -- Optimized SQL injection patterns to prevent catastrophic backtracking
+    local patterns = {
+        "select%s+[%w%*]+%s+from",  -- More specific SELECT pattern
+        "union%s+select%s+",        -- More specific UNION pattern
+        "insert%s+into%s+",
+        "delete%s+from%s+",
+        "drop%s+table%s+",
+        "exec%s*%(.-%))",           -- Bounded exec pattern
+        "execute%s*%(.-%))",        -- Bounded execute pattern
+        "update%s+[%w_]+%s+set",    -- More specific UPDATE pattern
+        "'%s*or%s*'1'%s*=%s*'1",   -- Specific OR condition
+        "--;?%s*$",                 -- Comment at end of line
+        "/%*.*%*/",                -- Inline comment
+        "xp_cmdshell%s*%(.-%))"    -- Bounded xp_cmdshell pattern
+    }
+    
+    for _, p in ipairs(patterns) do
+        local ok, found = pcall(string.find, lower_pattern, p)
+        if ok and found then
+            return true, 0.95
+        end
+    end
+    
+    return false, 0
 end
 
 -- Enhanced error handling for HTTP requests
@@ -110,128 +251,51 @@ local function protected_call(f, ...)
     return result
 end
 
--- Enhanced safe string function
-local function safe_string(str, max_len)
-    if not str then return "" end
-    if type(str) ~= "string" then
-        str = tostring(str)
-    end
-    max_len = max_len or MAX_STRING_LENGTH
-    local result = string.sub(str, 1, max_len)
-    return result
-end
-
--- Enhanced safe table size function
-local function safe_table_size(t)
-    local count = 0
-    if type(t) ~= "table" then return 0 end
-    for _ in pairs(t) do
-        count = count + 1
-        if count > MAX_ARGS then break end
-    end
-    return count
-end
-
--- Extract SQL patterns from request
-local function extract_sql_patterns(tx)
-    local patterns = {}
-    
-    -- Check ARGS
-    local args = m.getvars("ARGS", "")
-    if args then
-        for _, arg in ipairs(args) do
-            if arg.value and string.len(arg.value) > 0 then
-                log_debug("Checking ARGS: " .. safe_string(arg.name) .. "=" .. safe_string(arg.value))
-                table.insert(patterns, arg.value)
-            end
-        end
-    end
-    
-    -- Check REQUEST_URI
-    local uri = m.getvar("REQUEST_URI")
-    if uri then
-        log_debug("Checking URI: " .. safe_string(uri))
-        table.insert(patterns, uri)
-    end
-    
-    -- Check REQUEST_BODY
-    local body = m.getvar("REQUEST_BODY")
-    if body then
-        log_debug("Checking REQUEST_BODY")
-        table.insert(patterns, body)
-    end
-    
-    return patterns
-end
-
--- Make prediction request to ML server with enhanced logging
-local function predict_sqli(pattern)
-    if not pattern or type(pattern) ~= "string" then
-        log_debug("Invalid pattern provided", 2)
-        return nil, nil
-    end
-    
-    if string.len(pattern) > MAX_REQUEST_SIZE then
-        log_debug(string.format("Pattern too large: %d bytes", string.len(pattern)), 2)
-        return nil, nil
-    end
-    
-    log_debug("Processing pattern: " .. safe_string(pattern, 100) .. "...")
-    log_debug("Memory usage at start: " .. get_memory_usage())
-    
-    local request_body = protected_call(cjson.encode, {query = safe_string(pattern)})
-    if not request_body then
-        log_debug("Failed to encode request body", 3)
-        return nil, nil
-    end
-    
-    local response_body, code = make_http_request(
-        ML_SERVER_URL .. "/predict",
-        "POST",
-        {
-            ["Content-Type"] = "application/json",
-            ["Content-Length"] = string.len(request_body)
-        },
-        request_body
-    )
-    
-    if not response_body then
-        return nil, nil
-    end
-    
-    local response_data = protected_call(cjson.decode, response_body)
-    if not response_data then
-        log_debug("Failed to decode response", 3)
-        return nil, nil
-    end
-    
-    log_debug(string.format("Prediction result: is_sqli=%s, probability=%s",
-        tostring(response_data.is_sqli),
-        tostring(response_data.probability)))
-    
-    return response_data.is_sqli, response_data.probability
-end
-
--- Main entry point
+-- Main entry point with error handling
 function main()
-    local patterns = extract_sql_patterns()
+    local start_memory = get_memory_usage()
+    log_debug("Starting SQL injection check. " .. start_memory)
+    
+    -- Set timeout for the entire operation
+    local start_time = os.time()
+    local function check_timeout()
+        if os.time() - start_time > TIMEOUT then
+            log_debug("Operation timed out", 2)
+            return true
+        end
+        return false
+    end
+    
+    local ok, patterns = pcall(extract_sql_patterns)
+    if not ok or not patterns then
+        log_debug("Failed to extract patterns", 3)
+        return nil
+    end
+    
+    if check_timeout() then return nil end
+    
     local detected = false
     local max_probability = 0
     
     for _, pattern in ipairs(patterns) do
-        local is_sqli, probability = predict_sqli(pattern)
-        if is_sqli then
+        if check_timeout() then return nil end
+        
+        local ok, is_sqli, probability = pcall(check_sql_pattern, pattern)
+        if ok and is_sqli then
             detected = true
-            max_probability = math.max(max_probability, probability or 0)
+            max_probability = math.max(max_probability, probability)
             log_debug("SQL Injection detected with probability: " .. tostring(probability))
-            m.log(1, "[ML-Plugin] SQL Injection detected in pattern: " .. safe_string(pattern))
+            pcall(m.log, 1, "[ML-Plugin] SQL Injection detected in pattern: " .. safe_string(pattern))
         end
     end
     
     if detected then
-        m.setvar("tx.sql_injection_score", max_probability * 100)
+        pcall(m.setvar, "tx.sql_injection_score", max_probability * 100)
         return "detected"
     end
+    
+    local end_memory = get_memory_usage()
+    log_debug("Finished SQL injection check. " .. end_memory)
     
     return nil
 end
