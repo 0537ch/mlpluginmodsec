@@ -6,13 +6,29 @@
 function main()
     -- Variable Declarations:
     -- setting the machine learning server URL
-    pcall(require, "m")
+    local status, m = pcall(require, "m")
+    if not status then
+        return -1  -- Return early if ModSecurity module can't be loaded
+    end
+
+    -- Get ML server URL with validation
     local ml_server_url = m.getvar("TX.machine-learning-plugin_ml_server_url")
+    if not ml_server_url then
+        m.log(4, "ML server URL not configured")
+        return -1
+    end
+
+    -- Load required libraries safely
+    local status_http, http = pcall(require, "socket.http")
+    local status_ltn12, ltn12 = pcall(require, "ltn12")
+    
+    if not (status_http and status_ltn12) then
+        m.log(4, "Failed to load required libraries")
+        return -1
+    end
+
     -- initialising the variable to return the machine learning pass or block status
     local inbound_ml_result = 0
-    -- Importing libraries
-    local ltn12 = require("ltn12")
-    local http = require("socket.http")
     -- Initialising variables
     local method = m.getvar("REQUEST_METHOD")
     local path = m.getvar("REQUEST_FILENAME")
