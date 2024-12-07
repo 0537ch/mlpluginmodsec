@@ -1,29 +1,39 @@
 -- Machine Learning Client for ModSecurity
 -- Memory-safe implementation with proper cleanup
 
--- Initialize ModSecurity API with method checking
-local m = {}
-if _G.m then
-    -- Check required methods
-    local required_methods = {"log", "getvar", "getvars", "setvar"}
-    local missing_methods = {}
-    
-    for _, method in ipairs(required_methods) do
-        if type(_G.m[method]) ~= "function" then
-            table.insert(missing_methods, method)
+-- Defensive initialization
+local function init_modsecurity()
+    -- Avoid global table access that might cause segfault
+    local m = nil
+    local success, err = pcall(function()
+        if _G and type(_G.m) == "table" then
+            m = _G.m
         end
-    end
+    end)
     
-    if #missing_methods > 0 then
-        -- Log error and return if methods are missing
-        if type(_G.m.log) == "function" then
-            _G.m.log(1, "[ML-Plugin Error] Missing required methods: " .. table.concat(missing_methods, ", "))
-        end
+    if not success or not m then
         return nil
     end
     
-    m = _G.m
-else
+    -- Minimal required methods
+    local required = {
+        "log",
+        "getvar"
+    }
+    
+    -- Check methods existence without calling them
+    for _, method in ipairs(required) do
+        if type(m[method]) ~= "function" then
+            return nil
+        end
+    end
+    
+    return m
+end
+
+-- Initialize safely
+local m = init_modsecurity()
+if not m then
     return nil
 end
 
@@ -56,8 +66,8 @@ local ML_SERVER_URL = "http://localhost:5000"
 local TIMEOUT = 1  -- seconds
 local MAX_REQUEST_SIZE = 512 * 1024  -- 512KB
 local MAX_ARGS = 50
-local MAX_STRING_LENGTH = 4096
-local MAX_PATTERNS = 100  -- Maximum number of patterns to collect
+local MAX_STRING_LENGTH = 1024
+local MAX_PATTERNS = 50  -- Maximum number of patterns to collect
 local MAX_PATTERN_LENGTH = 1024  -- Maximum length of each pattern
 local DEBUG = true
 
