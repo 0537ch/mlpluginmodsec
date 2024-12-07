@@ -1,0 +1,16 @@
+# Basic ModSecurity configuration
+SecRuleEngine On
+SecRequestBodyAccess On
+
+# Debug logging
+SecDebugLog /var/log/modsec_debug.log
+SecDebugLogLevel 3
+
+# Load Lua script
+SecRule REQUEST_URI "@rx ." \
+    "id:9600100,\
+    phase:2,\
+    pass,\
+    t:none,\
+    nolog,\
+    lua:machine-learning-client.lua"

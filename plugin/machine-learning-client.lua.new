@@ -1,0 +1,25 @@
+-- Minimal ModSecurity Lua plugin
+local _M = {}
+
+function _M.main()
+    -- Basic initialization
+    local m = nil
+    if type(_G.m) == "table" then
+        m = _G.m
+    end
+    if not m then return nil end
+    
+    -- Get REQUEST_URI
+    local ok, uri = pcall(m.getvar, "REQUEST_URI")
+    if not ok or not uri then return nil end
+    
+    -- Very basic check
+    if string.find(string.lower(uri), "select") then
+        pcall(m.log, 1, "Basic SQL injection check")
+        return "detected"
+    end
+    
+    return nil
+end
+
+return _M

@@ -2,15 +2,26 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.feature_extraction.text import TfidfVectorizer
+from datetime import datetime
+import os
+import joblib
+import gc
+import csv
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.pipeline import Pipeline as ImbPipeline
+import itertools
+import json
+import time
+from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os
-import pickle
-from datetime import datetime
 import random
 import re
+import pickle
+from sklearn.metrics import classification_report, confusion_matrix
 
 class SQLInjectionDetector:
     def __init__(self, model_params=None):
@@ -61,14 +72,14 @@ class SQLInjectionDetector:
             else:
                 # Initialize new model
                 self.model = RandomForestClassifier(**self.model_params)
-                self.vectorizer = CountVectorizer(max_features=100, stop_words='english')
+                self.vectorizer = TfidfVectorizer(max_features=5000)
                 self.model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
                 print("Initialized new model")
         except Exception as e:
             print(f"Error loading model: {str(e)}")
             # Fallback to new model
             self.model = RandomForestClassifier(**self.model_params)
-            self.vectorizer = CountVectorizer(max_features=100, stop_words='english')
+            self.vectorizer = TfidfVectorizer(max_features=5000)
             self.model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     def save_model(self):
@@ -214,6 +225,263 @@ class SQLInjectionDetector:
         
         return report, cm, feature_importance
 
+    def test_parameters(self, X_train, X_test, y_train, y_test, models_dir='models', results_dir='results'):
+        """
+        Test different parameter combinations and save each model
+        """
+        # Parameter grid yang lebih kecil untuk mengurangi beban komputasi
+        param_grid = {
+            'n_estimators': [100, 200, 300],  # Mengurangi jumlah opsi
+            'max_depth': [10, 15, None],      # Mengurangi jumlah opsi
+            'min_samples_split': [2, 10, 20], # Mengurangi jumlah opsi
+            'class_weight': ['balanced']  # Hanya menggunakan balanced weight
+        }
+        
+        # Create directories
+        for dir_path in [models_dir, results_dir]:
+            os.makedirs(dir_path, exist_ok=True)
+        
+        results = []
+        best_accuracy = 0
+        best_model = None
+        
+        # Test each parameter individually
+        for param_name, param_values in param_grid.items():
+            print(f"\nTesting {param_name}:")
+            
+            for value in param_values:
+                # Base parameters
+                params = {
+                    'n_estimators': 200,
+                    'max_depth': 15,
+                    'min_samples_split': 10,
+                    'class_weight': 'balanced',
+                    'random_state': 42
+                }
+                
+                # Update tested parameter
+                params[param_name] = value
+                
+                max_retries = 3
+                retry_count = 0
+                success = False
+                
+                while not success and retry_count < max_retries:
+                    try:
+                        # Train model
+                        start_time = time.time()
+                        model = RandomForestClassifier(**params)
+                        model.fit(X_train, y_train)
+                        train_time = time.time() - start_time
+                        
+                        # Evaluate
+                        y_pred = model.predict(X_test)
+                        accuracy = accuracy_score(y_test, y_pred)
+                        f1 = f1_score(y_test, y_pred)
+                        
+                        print(f"{param_name}={value}:")
+                        print(f"Accuracy={accuracy:.4f}, F1={f1:.4f}")
+                        print(f"Training Time={train_time:.2f}s")
+                        
+                        # Save results
+                        results.append({
+                            'parameter': param_name,
+                            'value': value,
+                            'accuracy': accuracy,
+                            'f1_score': f1,
+                            'train_time': train_time
+                        })
+                        
+                        # Save model if best so far
+                        if accuracy > best_accuracy:
+                            best_accuracy = accuracy
+                            best_model = {
+                                'model': model,
+                                'params': params.copy(),
+                                'accuracy': accuracy,
+                                'f1_score': f1
+                            }
+                        
+                        success = True
+                        
+                    except Exception as e:
+                        retry_count += 1
+                        print(f"Error during training (attempt {retry_count}/{max_retries}): {str(e)}")
+                        if retry_count < max_retries:
+                            print("Retrying after 60 seconds...")
+                            time.sleep(60)  # Wait before retry
+                        else:
+                            print("Max retries reached, skipping this parameter combination")
+                            break
+                
+                # Clear memory
+                gc.collect()
+        
+        # Save best model
+        if best_model:
+            model_path = os.path.join(models_dir, 'best_model.pkl')
+            joblib.dump(best_model['model'], model_path)
+            
+            # Save best model info
+            info_path = os.path.join(results_dir, 'best_model_info.txt')
+            with open(info_path, 'w') as f:
+                f.write("Best Model Parameters:\n")
+                for param, value in best_model['params'].items():
+                    f.write(f"{param}: {value}\n")
+                f.write(f"\nAccuracy: {best_model['accuracy']:.4f}")
+                f.write(f"\nF1 Score: {best_model['f1_score']:.4f}")
+        
+        # Convert results to DataFrame
+        results_df = pd.DataFrame(results)
+        results_df.to_csv(os.path.join(results_dir, 'parameter_results.csv'), index=False)
+        
+        return results_df, best_model
+
+def train_model(X_train, y_train, params=None):
+    """Train model with progress tracking"""
+    if params is None:
+        params = {
+            'n_estimators': 200,
+            'max_depth': 15,
+            'min_samples_split': 2,
+            'class_weight': 'balanced',
+            'random_state': 42
+        }
+    
+    try:
+        print("\n=== Training Progress ===")
+        total_steps = 4
+        current_step = 0
+        
+        # Step 1: Prepare sampling pipeline
+        current_step += 1
+        print(f"\nStep {current_step}/{total_steps}: Preparing sampling pipeline...")
+        sampling_pipeline = ImbPipeline([
+            ('smote', SMOTE(random_state=42, sampling_strategy=0.8)),
+            ('rus', RandomUnderSampler(random_state=42, sampling_strategy=0.9))
+        ])
+        
+        # Step 2: Apply sampling
+        current_step += 1
+        print(f"\nStep {current_step}/{total_steps}: Applying data resampling...")
+        start_time = time.time()
+        X_resampled, y_resampled = sampling_pipeline.fit_resample(X_train, y_train)
+        print(f"✓ Resampling completed in {time.time() - start_time:.2f} seconds")
+        print(f"✓ Resampled data shape: {X_resampled.shape}")
+        
+        # Step 3: Initialize model
+        current_step += 1
+        print(f"\nStep {current_step}/{total_steps}: Initializing Random Forest model...")
+        model = RandomForestClassifier(**params)
+        print("✓ Model initialized with parameters:")
+        for param, value in params.items():
+            print(f"  - {param}: {value}")
+        
+        # Step 4: Train model
+        current_step += 1
+        print(f"\nStep {current_step}/{total_steps}: Training model...")
+        start_time = time.time()
+        model.fit(X_resampled, y_resampled)
+        training_time = time.time() - start_time
+        print(f"✓ Training completed in {training_time:.2f} seconds")
+        
+        # Quick evaluation
+        train_pred = model.predict(X_resampled)
+        train_accuracy = accuracy_score(y_resampled, train_pred)
+        print(f"\nInitial Training Accuracy: {train_accuracy:.4f}")
+        
+        return model
+        
+    except Exception as e:
+        print(f"\n❌ Error in model training: {str(e)}")
+        return None
+
+def test_parameters(X_train, y_train, X_test, y_test, param_grid=None):
+    """Test different model parameters with advanced sampling and progress tracking"""
+    if param_grid is None:
+        param_grid = {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [10, 15, None],
+            'min_samples_split': [2, 10, 20],
+            'class_weight': ['balanced']  # Hanya menggunakan balanced weight
+        }
+    
+    best_score = 0
+    best_params = None
+    best_model = None
+    results = []
+    
+    try:
+        # Generate parameter combinations
+        param_combinations = [dict(zip(param_grid.keys(), v)) 
+                            for v in itertools.product(*param_grid.values())]
+        total_combinations = len(param_combinations)
+        
+        print(f"\nTesting {total_combinations} parameter combinations:")
+        for param_name, param_values in param_grid.items():
+            print(f"{param_name}: {param_values}")
+        
+        for i, params in enumerate(param_combinations, 1):
+            try:
+                print(f"\nTesting combination {i}/{total_combinations}")
+                print(f"Parameters: {params}")
+                
+                # Train model with current parameters
+                start_time = time.time()
+                model = RandomForestClassifier(**params, random_state=42)
+                model.fit(X_train, y_train)
+                training_time = time.time() - start_time
+                
+                # Evaluate
+                y_pred = model.predict(X_test)
+                accuracy = accuracy_score(y_test, y_pred)
+                f1 = f1_score(y_test, y_pred)
+                
+                result = {
+                    'params': str(params),
+                    'accuracy': accuracy,
+                    'f1_score': f1,
+                    'training_time': training_time
+                }
+                results.append(result)
+                
+                print(f"F1 Score: {f1:.4f}")
+                print(f"Accuracy: {accuracy:.4f}")
+                print(f"Training Time: {training_time:.2f}s")
+                
+                # Update best model if better f1 score
+                if f1 > best_score:
+                    best_score = f1
+                    best_params = params.copy()
+                    best_model = model
+                    print(f"New best model found!")
+                
+                # Clear memory
+                gc.collect()
+                
+            except Exception as e:
+                print(f"\nError testing parameters {params}: {str(e)}")
+                continue
+        
+        # Save results
+        results_df = pd.DataFrame(results)
+        
+        if len(results) > 0:
+            print("\nParameter testing completed!")
+            print("\nTop 5 best performing parameter combinations:")
+            top_results = results_df.nlargest(5, 'f1_score')
+            print(top_results[['params', 'f1_score', 'accuracy', 'training_time']].to_string())
+            
+            print("\nBest parameters found:")
+            print(f"Parameters: {best_params}")
+            print(f"Best F1 Score: {best_score:.4f}")
+        
+        return best_model, best_params, results_df
+        
+    except Exception as e:
+        print(f"Error in parameter testing: {str(e)}")
+        return None, None, None
+
 def generate_normal_queries():
     """Generate contoh query SQL normal"""
     templates = [
@@ -329,163 +597,309 @@ def generate_normal_queries():
     return queries
 
 def load_dataset(file_path):
-    """Load dataset dengan format khusus"""
+    """Load dataset from CSV file with error handling for different formats"""
     try:
-        queries = []
-        labels = []
+        # Try different encodings and delimiters
+        encodings = ['utf-8', 'utf-16', 'utf-16le', 'utf-16be', 'latin1', 'cp1252', 'iso-8859-1']
+        delimiters = [',', ';', '\t']
+        df = None
         
-        # Coba berbagai encoding
-        encodings = ['utf-8', 'utf-16', 'latin1']
-        content = None
+        # First try to detect encoding
+        try:
+            with open(file_path, 'rb') as f:
+                raw = f.read()
+                if raw.startswith(b'\xff\xfe') or raw.startswith(b'\xfe\xff'):
+                    # UTF-16 detected, try both little and big endian
+                    for enc in ['utf-16', 'utf-16le', 'utf-16be']:
+                        try:
+                            df = pd.read_csv(file_path, 
+                                          encoding=enc,
+                                          delimiter=',',
+                                          quoting=csv.QUOTE_ALL,
+                                          escapechar='\\',
+                                          on_bad_lines='skip',
+                                          dtype=str)
+                            if len(df.columns) >= 2:
+                                break
+                        except:
+                            continue
+                    if df is not None and len(df.columns) >= 2:
+                        print(f"Successfully loaded {file_path} with {enc} encoding")
+        except:
+            pass
+            
+        # If UTF-16 detection failed, try other encodings
+        if df is None:
+            for encoding in encodings:
+                for delimiter in delimiters:
+                    try:
+                        df = pd.read_csv(file_path, 
+                                       encoding=encoding,
+                                       delimiter=delimiter,
+                                       quoting=csv.QUOTE_ALL,
+                                       escapechar='\\',
+                                       on_bad_lines='skip',
+                                       dtype=str)
+                        if len(df.columns) >= 2:
+                            print(f"Successfully loaded {file_path} with {encoding} encoding and '{delimiter}' delimiter")
+                            break
+                    except Exception:
+                        continue
+                if df is not None and len(df.columns) >= 2:
+                    break
         
-        for encoding in encodings:
-            try:
-                with open(file_path, 'r', encoding=encoding) as f:
-                    content = f.readlines()
+        if df is None or len(df.columns) < 2:
+            print(f"Error: Could not read {file_path} with any supported format")
+            return None
+            
+        # Clean column names
+        df.columns = df.columns.str.strip().str.lower()
+        
+        # Remove any BOM markers from column names
+        df.columns = df.columns.str.replace('ÿþ', '').str.replace('þÿ', '')
+        
+        # Try to identify query and label columns
+        query_col = None
+        label_col = None
+        
+        # Common names for query column
+        query_columns = ['query', 'sentence', 'text', 'sql', 's']
+        for col in df.columns:
+            if col in query_columns or 'query' in col.lower() or 'sql' in col.lower():
+                query_col = col
                 break
-            except UnicodeError:
-                continue
         
-        if not content:
-            print(f"Could not read {file_path} with any encoding")
+        # Common names for label column
+        label_columns = ['label', 'class', 'is_sqli', 'injection']
+        for col in df.columns:
+            if col in label_columns or 'label' in col.lower() or 'class' in col.lower():
+                label_col = col
+                break
+        
+        # If columns not found, try to infer from content and position
+        if query_col is None or label_col is None:
+            # Check if we have exactly 2 columns
+            if len(df.columns) == 2:
+                # Assume first column is query and second is label
+                cols = list(df.columns)
+                query_col = cols[0]
+                label_col = cols[1]
+            else:
+                # Try to find by content
+                for col in df.columns:
+                    if df[col].str.len().mean() > 20:  # Likely contains SQL queries
+                        query_col = col
+                        break
+                
+                # Try to find label column
+                for col in reversed(df.columns):
+                    if col != query_col:  # Skip query column
+                        try:
+                            # Try converting to numeric
+                            values = pd.to_numeric(df[col].str.strip().str.extract('(\d+)', expand=False).fillna('0'))
+                            if values.isin([0, 1]).all() or values.nunique() <= 10:
+                                label_col = col
+                                break
+                        except:
+                            continue
+        
+        if query_col is None or label_col is None:
+            print(f"Error: Could not identify query and label columns in {file_path}")
+            print(f"Columns found: {list(df.columns)}")
             return None
-            
-        # Process lines
-        for line in content:
-            line = line.strip()
-            if not line or line.lower().startswith('sentence'):  # Skip header dan baris kosong
-                continue
-                
-            # Cari label (1) di akhir baris
-            if line.endswith(",1") or line.endswith(",1,") or line.endswith(",1,,"):
-                # Ambil query (semua sebelum ,1 di akhir)
-                query = line.rsplit(',1', 1)[0].strip().strip('"')
-                if query:  # Pastikan query tidak kosong
-                    queries.append(query)
-                    labels.append(1)
         
-        if not queries:
-            print(f"No valid data found in {file_path}")
-            return None
-            
-        # Generate normal queries dengan jumlah yang seimbang
-        num_injection_queries = len(queries)
-        normal_queries = generate_normal_queries()
-        
-        # Pastikan jumlah query normal mendekati jumlah query injection
-        multiplier = (num_injection_queries // len(normal_queries)) + 1
-        balanced_normal_queries = []
-        
-        for _ in range(multiplier):
-            # Tambah variasi untuk setiap query normal
-            for query in normal_queries:
-                # Query asli
-                balanced_normal_queries.append(query)
-                
-                # Variasi dengan case berbeda
-                balanced_normal_queries.append(query.lower())
-                
-                # Variasi dengan spasi berbeda
-                balanced_normal_queries.append(re.sub(r'\s+', ' ', query))
-                
-                # Variasi dengan nama tabel/kolom berbeda
-                for old, new in [
-                    ('users', 'accounts'),
-                    ('products', 'items'),
-                    ('orders', 'transactions')
-                ]:
-                    if old in query.lower():
-                        balanced_normal_queries.append(query.lower().replace(old, new))
-        
-        # Ambil subset random dari query normal untuk menyeimbangkan dataset
-        if len(balanced_normal_queries) > num_injection_queries:
-            balanced_normal_queries = random.sample(balanced_normal_queries, num_injection_queries)
-        
-        # Tambahkan query normal ke dataset
-        queries.extend(balanced_normal_queries)
-        labels.extend([0] * len(balanced_normal_queries))
-        
-        # Acak urutan dataset
-        combined = list(zip(queries, labels))
-        random.shuffle(combined)
-        queries, labels = zip(*combined)
-        
-        # Buat DataFrame
-        df = pd.DataFrame({
-            'Sentence': queries,
-            'Label': labels
+        # Create standardized DataFrame
+        standardized_df = pd.DataFrame({
+            'Sentence': df[query_col].astype(str).str.strip(),
+            'Label': df[label_col]
         })
         
-        print(f"Loaded {len(df)} samples from {os.path.basename(file_path)}")
-        print(f"Label distribution:\n{df['Label'].value_counts()}")
-        return df
+        # Clean and convert label to int
+        # First try to extract numbers
+        standardized_df['Label'] = standardized_df['Label'].str.extract('(\d+)', expand=False).fillna('0')
+        # Convert to int and standardize non-zero values to 1
+        standardized_df['Label'] = standardized_df['Label'].astype(int)
+        standardized_df.loc[standardized_df['Label'] > 0, 'Label'] = 1
+        
+        # Remove empty queries and duplicates
+        standardized_df = standardized_df[standardized_df['Sentence'].str.len() > 0].copy()
+        standardized_df = standardized_df.drop_duplicates(subset=['Sentence'], keep='first')
+        
+        # Basic dataset info
+        print(f"Loaded {len(standardized_df)} samples from {os.path.basename(file_path)}")
+        print("Label distribution:")
+        print(standardized_df['Label'].value_counts())
+        
+        return standardized_df
         
     except Exception as e:
         print(f"Error loading {file_path}: {str(e)}")
         return None
 
+def save_progress(message, log_file='training_progress.log'):
+    """Save progress message to log file with timestamp"""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with open(log_file, 'a', encoding='utf-8') as f:
+        f.write(f'[{timestamp}] {message}\n')
+    print(message)
+
+def train_model(X_train, y_train, params=None):
+    """Train model with progress logging"""
+    if params is None:
+        params = {
+            'n_estimators': 200,
+            'max_depth': 15,
+            'min_samples_split': 2,
+            'class_weight': 'balanced',
+            'random_state': 42
+        }
+    
+    try:
+        save_progress("\n=== Starting Model Training ===")
+        
+        # Step 1: Prepare sampling pipeline
+        save_progress("Step 1/4: Preparing sampling pipeline")
+        sampling_pipeline = ImbPipeline([
+            ('smote', SMOTE(random_state=42, sampling_strategy=0.8)),
+            ('rus', RandomUnderSampler(random_state=42, sampling_strategy=0.9))
+        ])
+        
+        # Step 2: Apply sampling
+        save_progress("Step 2/4: Applying data resampling")
+        start_time = time.time()
+        X_resampled, y_resampled = sampling_pipeline.fit_resample(X_train, y_train)
+        save_progress(f"✓ Resampling completed in {time.time() - start_time:.2f} seconds")
+        save_progress(f"✓ Resampled data shape: {X_resampled.shape}")
+        
+        # Step 3: Initialize model
+        save_progress("Step 3/4: Initializing Random Forest model")
+        model = RandomForestClassifier(**params)
+        param_str = "\n".join([f"  - {k}: {v}" for k, v in params.items()])
+        save_progress(f"Model parameters:\n{param_str}")
+        
+        # Step 4: Train model
+        save_progress("Step 4/4: Training model")
+        start_time = time.time()
+        model.fit(X_resampled, y_resampled)
+        training_time = time.time() - start_time
+        save_progress(f"✓ Training completed in {training_time:.2f} seconds")
+        
+        # Evaluate training results
+        train_pred = model.predict(X_resampled)
+        train_accuracy = accuracy_score(y_resampled, train_pred)
+        save_progress(f"Training Accuracy: {train_accuracy:.4f}")
+        save_progress("=== Training Complete ===\n")
+        
+        return model
+        
+    except Exception as e:
+        save_progress(f"❌ Error in model training: {str(e)}")
+        return None
+
 def main():
-    # Create output directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join('B:/project besar/results', f'analysis_{timestamp}')
-    os.makedirs(output_dir, exist_ok=True)
+    log_file = f'training_progress_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+    save_progress("=== SQL Injection Detection Model Training ===", log_file)
     
-    # Load and combine all datasets
-    print("Loading datasets...")
-    datasets = []
-    
-    dataset_files = [
-        'B:/project besar/archive/sqli.csv',
-        'B:/project besar/archive/sqliv2.csv',
-        'B:/project besar/archive/sqliv3.csv'
-    ]
-    
-    for file in dataset_files:
-        df = load_dataset(file)
-        if df is not None:
-            datasets.append(df)
-    
-    if not datasets:
-        print("Error: No datasets could be loaded!")
-        return
-    
-    # Combine all datasets
-    data = pd.concat(datasets, ignore_index=True)
-    print(f"\nTotal combined samples: {len(data)}")
-    
-    # Split data
-    X = data['Sentence']  # Kolom query
-    y = data['Label']    # Kolom label
-    print(f"\nFeatures shape: {X.shape}")
-    print(f"Labels shape: {y.shape}")
-    print(f"\nFinal label distribution:\n{y.value_counts()}")
-    
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
-    # Initialize detector
-    print("\nInitializing detector...")
-    detector = SQLInjectionDetector()
-    
-    # Prepare data
-    print("Preparing training data...")
-    X_train_prepared = detector.prepare_data(X_train)
-    X_test_prepared = detector.prepare_data(X_test)
-    
-    # Train model
-    print("Training model...")
-    detector.train(X_train_prepared, y_train)
-    
-    # Save model
-    print("Saving model...")
-    detector.save_model()
-    
-    # Evaluate
-    print("Evaluating model...")
-    report, cm, feature_importance = detector.evaluate(X_test_prepared, y_test, output_dir)
-    
-    print(f"\nTraining completed! Results saved in: {output_dir}")
-    print("\nClassification Report:")
-    print(report)
+    try:
+        start_time = time.time()
+        
+        # Step 1: Load Datasets
+        save_progress("Step 1/6: Loading Datasets", log_file)
+        datasets = []
+        dataset_files = ['sqli.csv', 'sqliv2.csv', 'sqliv3.csv', 'sqliv4.csv']
+        
+        for file in dataset_files:
+            file_path = os.path.join('archive', file)
+            save_progress(f"Loading {file}...", log_file)
+            dataset = load_dataset(file_path)
+            if dataset is not None:
+                datasets.append(dataset)
+                save_progress(f"✓ Successfully loaded {file}", log_file)
+            else:
+                save_progress(f"⚠ Failed to load {file}", log_file)
+        
+        if not datasets:
+            raise Exception("No valid datasets loaded")
+        
+        # Step 2: Preprocess Data
+        save_progress("Step 2/6: Preprocessing Data", log_file)
+        combined_data = pd.concat(datasets, ignore_index=True)
+        X = combined_data['Sentence']
+        y = combined_data['Label']
+        save_progress(f"Total samples: {len(X)}", log_file)
+        save_progress(f"Label distribution:\n{y.value_counts(normalize=True)}", log_file)
+        
+        # Step 3: Vectorize Text
+        save_progress("Step 3/6: Vectorizing Text", log_file)
+        start_time_vec = time.time()
+        vectorizer = TfidfVectorizer(max_features=5000)
+        X_vectorized = vectorizer.fit_transform(X)
+        save_progress(f"✓ Vectorization completed in {time.time() - start_time_vec:.2f} seconds", log_file)
+        save_progress(f"✓ Features shape: {X_vectorized.shape}", log_file)
+        
+        # Step 4: Split Dataset
+        save_progress("Step 4/6: Splitting Dataset", log_file)
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_vectorized, y, test_size=0.2, random_state=42
+        )
+        save_progress(f"✓ Training set size: {X_train.shape[0]}", log_file)
+        save_progress(f"✓ Testing set size: {X_test.shape[0]}", log_file)
+        
+        # Step 5: Parameter Testing
+        save_progress("Step 5/6: Testing Different Parameters", log_file)
+        param_grid = {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [10, 15, None],
+            'min_samples_split': [2, 5, 10],
+            'class_weight': ['balanced']  # Hanya menggunakan balanced weight
+        }
+        
+        save_progress("\nTesting parameter combinations:", log_file)
+        for param, values in param_grid.items():
+            save_progress(f"{param}: {values}", log_file)
+        
+        best_model, best_params, results_df = test_parameters(
+            X_train, y_train, X_test, y_test, param_grid
+        )
+        
+        # Step 6: Save Results
+        save_progress("Step 6/6: Saving Final Results", log_file)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_dir = f'model_testing/{timestamp}'
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Save vectorizer
+        vectorizer_path = os.path.join(output_dir, 'vectorizer.joblib')
+        joblib.dump(vectorizer, vectorizer_path)
+        save_progress(f"✓ Saved vectorizer to: {vectorizer_path}", log_file)
+        
+        if best_model is not None:
+            # Save best model
+            model_path = os.path.join(output_dir, 'best_model.joblib')
+            joblib.dump(best_model, model_path)
+            
+            # Save parameter testing results
+            results_path = os.path.join(output_dir, 'parameter_results.csv')
+            results_df.to_csv(results_path, index=False)
+            
+            save_progress("\nParameter Testing Results:", log_file)
+            save_progress("\nTop 5 Best Performing Models:", log_file)
+            top_results = results_df.nlargest(5, 'f1_score')
+            save_progress(str(top_results[['params', 'f1_score', 'accuracy', 'training_time']]), log_file)
+            
+            save_progress("\nBest Model Performance:", log_file)
+            save_progress(f"✓ Parameters: {best_params}", log_file)
+            save_progress(f"✓ F1 Score: {results_df['f1_score'].max():.4f}", log_file)
+            save_progress(f"✓ Accuracy: {results_df.loc[results_df['f1_score'].idxmax(), 'accuracy']:.4f}", log_file)
+            save_progress(f"✓ Model saved to: {model_path}", log_file)
+            save_progress(f"✓ Results saved to: {results_path}", log_file)
+        
+        total_time = time.time() - start_time
+        save_progress(f"\n✓ Total execution time: {total_time:.2f} seconds", log_file)
+        save_progress("=== Training Complete ===", log_file)
+        
+    except Exception as e:
+        save_progress(f"❌ Error in main execution: {str(e)}", log_file)
 
 if __name__ == "__main__":
     main()

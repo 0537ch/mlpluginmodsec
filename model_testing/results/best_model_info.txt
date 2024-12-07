@@ -1,0 +1,4 @@
+Best Model Parameters:
+{'n_estimators': 50, 'max_depth': 15, 'min_samples_split': 10, 'class_weight': 'balanced', 'random_state': 42}
+
+Accuracy: 1.0000
