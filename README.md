@@ -1,126 +1,122 @@
-# ModSecurity ML Integration for SQL Injection Detection
+# ModSecurity Machine Learning Plugin Integration
 
-This project implements a machine learning-based SQL injection detection system integrated with ModSecurity. It uses a Random Forest classifier to detect potential SQL injection attacks and provides real-time predictions through a Flask-based API server.
+Integrasi ModSecurity dengan Machine Learning untuk deteksi serangan yang lebih akurat.
 
-## Project Structure
+## Komponen Utama
+
+### 1. ModSecurity Plugin
+- Konfigurasi ML plugin dengan rule ID range 9516100-9516130
+- Lua script untuk komunikasi dengan ML server
+- Integrasi dengan OWASP Core Rule Set (CRS)
+
+### 2. ML Server
+- Flask server yang menjalankan model machine learning
+- Endpoint prediksi di port 5000
+- Systemd service untuk manajemen otomatis
+- Model untuk deteksi SQL Injection dan serangan web lainnya
+
+## Struktur File
 
 ```
 .
-├── ml_model_server/
-│   ├── placeholder.py        # ML server implementation
-│   ├── requirements.txt      # Python dependencies
-│   └── ml-server.service    # Systemd service file
 ├── plugin/
-│   ├── machine-learning-client.lua       # ModSecurity Lua client
-│   ├── machine-learning-config.conf      # ModSecurity configuration
-│   └── machine-learning.load             # ModSecurity load file
-├── sqli.py                  # SQL Injection detector implementation
-└── README.md               # This file
+│   ├── machine-learning.conf     # Konfigurasi ModSecurity ML plugin
+│   └── machine-learning-client.lua # Lua script untuk ML
+├── ml_model_server/
+│   ├── placeholder.py           # ML server implementation
+│   └── sql_injection_detector.pkl # Pre-trained ML model
+└── config/
+    ├── modsecurity/            # Konfigurasi ModSecurity
+    └── apache2/               # Konfigurasi Apache
 ```
 
-## Features
+## Instalasi
 
-- Real-time SQL injection detection using machine learning
-- Memory-safe ModSecurity integration
-- Automatic model reloading and versioning
-- Rate limiting and request size validation
-- Comprehensive error handling and logging
-- Health check endpoints
+### Prerequisites
+- Apache2
+- ModSecurity
+- OWASP CRS
+- Python 3.8+
+- Flask dan dependensi Python lainnya
 
-## Requirements
+### Langkah Instalasi
 
-### Python Dependencies
-- Flask
-- Flask-Limiter
-- scikit-learn
-- pandas
-- numpy
-- psutil
-
-### System Requirements
-- ModSecurity v2.9.5 or higher
-- Apache2 with mod_security2
-- Lua 5.1 or higher with luasocket and lua-cjson
-
-## Installation
-
-1. Install Python dependencies:
+1. Setup ModSecurity:
 ```bash
-pip install -r ml_model_server/requirements.txt
+# Copy file konfigurasi
+sudo cp plugin/machine-learning.conf /etc/modsecurity/plugin/machine-learning/
+sudo cp plugin/machine-learning-client.lua /etc/modsecurity/plugin/machine-learning/
 ```
 
-2. Install Lua dependencies:
+2. Setup ML Server:
 ```bash
-luarocks install luasocket
-luarocks install lua-cjson
+# Copy ML server files
+sudo mkdir -p /var/www/onlineshoplrv/ml_model_server
+sudo cp ml_model_server/* /var/www/onlineshoplrv/ml_model_server/
+
+# Setup service
+sudo cp config/ml-server.service /etc/systemd/system/
+sudo systemctl enable ml-server
+sudo systemctl start ml-server
 ```
 
-3. Configure ModSecurity:
+## Penggunaan
+
+### Testing Basic
 ```bash
-# Copy plugin files
-cp plugin/* /etc/modsecurity/
+# Test normal request (should pass)
+curl "http://localhost/test/search?q=hello"
 
-# Set permissions
-chmod 755 /etc/modsecurity/lua/machine-learning-client.lua
-chown www-data:www-data /etc/modsecurity/lua/machine-learning-client.lua
+# Test SQL injection (should be blocked)
+curl "http://localhost/test/search?q=1' OR '1'='1"
 ```
 
-4. Setup ML server service:
+### Monitoring
+
+1. ModSecurity Logs:
 ```bash
-cp ml_model_server/ml-server.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable ml-server
-systemctl start ml-server
+sudo tail -f /var/log/apache2/error.log
+sudo tail -f /var/log/apache2/modsec_debug.log
 ```
 
-## Configuration
-
-### ModSecurity Configuration
-The plugin can be configured through `machine-learning-config.conf`:
-- ML server URL
-- Request timeouts
-- Rate limits
-- Memory limits
-
-### ML Server Configuration
-The ML server can be configured through environment variables:
-- `ML_SERVER_PORT`: Port number (default: 5000)
-- `ML_MODEL_RELOAD_INTERVAL`: Model reload interval in seconds (default: 3600)
-- `ML_MAX_REQUEST_SIZE`: Maximum request size in bytes (default: 1MB)
-
-## Usage
-
-1. Start the ML server:
+2. ML Server Logs:
 ```bash
-systemctl start ml-server
+sudo journalctl -u ml-server -f
 ```
 
-2. Enable ModSecurity rules:
+## Troubleshooting
+
+### Common Issues
+
+1. ML Server tidak berjalan:
 ```bash
-a2enmod security2
-systemctl restart apache2
+sudo systemctl status ml-server
+sudo journalctl -u ml-server -n 50
 ```
 
-3. Monitor logs:
-```bash
-tail -f /var/log/apache2/error.log
-tail -f /var/log/ml_server.log
-```
+2. ModSecurity blocking legitimate traffic:
+- Check `/var/log/apache2/error.log`
+- Adjust anomaly score threshold in `machine-learning.conf`
 
-## Contributing
+## Maintenance
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- Regular model updates
+- Log rotation
+- Performance monitoring
+- Rule tuning based on false positives/negatives
+
+## Security Considerations
+
+- ML Server hanya bisa diakses dari localhost
+- Secure communication antara ModSecurity dan ML Server
+- Regular updates untuk semua komponen
+- Monitoring false positives/negatives
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the Apache License 2.0
 
-## Acknowledgments
+## Authors
 
-- OWASP ModSecurity Core Rule Set project
-- scikit-learn team
-- Flask team
+- Original CRS ML Plugin Team
+- Custom modifications by Security Team

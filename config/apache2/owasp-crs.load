@@ -1,0 +1,11 @@
+# Load CRS config
+Include /etc/modsecurity/crs/crs-setup.conf
+
+# Load ML plugin
+Include /etc/modsecurity/plugin/machine-learning/machine-learning.conf
+
+# Load CRS rules
+Include /usr/share/modsecurity-crs/rules/*.conf
+
+# Load exclusion rules if needed
+IncludeOptional /etc/modsecurity/crs/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf
