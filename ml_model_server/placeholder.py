@@ -18,8 +18,12 @@ import joblib
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('ml_server.log'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -60,8 +64,31 @@ class MLServer:
         try:
             if not queries:
                 return 1
-            predictions = self.model.predict(queries)
-            return -1 if any(pred == 1 for pred in predictions) else 1
+                
+            # Use the loaded model for prediction
+            detector = SQLInjectionDetector()
+            X = detector.prepare_data(queries)
+            
+            # Use our loaded model for prediction
+            probabilities = self.model.predict_proba(X)
+            
+            # Get probability of malicious class (class 1)
+            malicious_probs = probabilities[:, 1]
+            
+            # If any query has high probability of being malicious (>0.5)
+            threshold = 0.5
+            is_malicious = any(prob > threshold for prob in malicious_probs)
+            
+            # Log the prediction details
+            for query, prob in zip(queries, malicious_probs):
+                logger.info(f"Query: {query}")
+                logger.info(f"Malicious probability: {prob}")
+                
+            if is_malicious:
+                logger.warning("SQL Injection attempt detected!")
+                return -1
+            return 1
+            
         except Exception as e:
             logger.error(f"Prediction error: {str(e)}")
             return 1  # Fail open
@@ -73,9 +100,16 @@ def process_request(form_data):
     try:
         method = form_data['method']
         path = form_data['path']
-        args = json.loads(form_data['args'])
+        args = json.loads(form_data['args']) if isinstance(form_data['args'], str) else form_data['args']
         hour = int(form_data['hour'])
         day = int(form_data['day'])
+
+        # Log incoming request details
+        logger.info("Received request:")
+        logger.info(f"Method: {method}")
+        logger.info(f"Path: {path}")
+        logger.info(f"Args: {json.dumps(args, indent=2)}")
+        logger.info(f"Hour: {hour}, Day: {day}")
 
         # Clean and prepare args
         queries = []
@@ -83,9 +117,11 @@ def process_request(form_data):
             cleaned_value = v.replace("$#$", '"')
             queries.append(cleaned_value)
             args[k] = cleaned_value
+            logger.debug(f"Processing argument - Key: {k}, Value: {cleaned_value}")
 
         # Log request details
         logger.info(f"Processing request - Method: {method}, Path: {path}, Args Count: {len(args)}")
+        logger.info(f"Queries to check: {queries}")
         
         # Make prediction
         score = ml_server.predict(queries)
@@ -94,10 +130,15 @@ def process_request(form_data):
         gc.collect()
         
         logger.info(f"Prediction result: {score}")
-        return str(score), 200 if score > 0 else 401
+        if score < 0:
+            logger.warning(f"SQL Injection detected in queries: {queries}")
+            logger.info("Returning score=-1, status=403")
+            return "-1", 403  # Return score and 403 for SQL injection
+        logger.info("Returning score=1, status=200")
+        return "1", 200  # Return score and 200 for safe queries
         
     except Exception as e:
-        logger.error(f"Error processing request: {str(e)}")
+        logger.error(f"Error processing request: {str(e)}", exc_info=True)
         return "1", 200  # Fail open on error
 
 @app.route('/health', methods=['GET'])
@@ -121,14 +162,43 @@ def health_check():
 def query_ml():
     if request.method == 'POST':
         try:
-            future = executor.submit(process_request, request.form)
-            result = future.result(timeout=MODEL_TIMEOUT)
-            return result
+            # Log raw request data
+            logger.debug("Raw request data:")
+            logger.debug(f"Headers: {dict(request.headers)}")
+            logger.debug(f"Form: {request.form}")
+            logger.debug(f"JSON: {request.get_json(silent=True)}")
+            
+            # Handle both form data and JSON
+            if request.is_json:
+                data = request.get_json()
+                logger.info("Received JSON request")
+            else:
+                data = request.form
+                logger.info("Received form data request")
+                
+            # Convert data to expected format
+            form_data = {
+                'method': data.get('method', ''),
+                'path': data.get('path', ''),
+                'args': data.get('args', '{}') if isinstance(data.get('args'), str) else json.dumps(data.get('args', {})),
+                'hour': data.get('hour', 0),
+                'day': data.get('day', 0)
+            }
+            
+            logger.info(f"Processed request data: {json.dumps(form_data, indent=2)}")
+            
+            future = executor.submit(process_request, form_data)
+            score, status_code = future.result(timeout=MODEL_TIMEOUT)
+            logger.info(f"Returning response - Score: {score}, Status: {status_code}")
+            
+            # Ensure score is string and status is int
+            return str(score), int(status_code)
+            
         except TimeoutError:
             logger.warning("Request timed out")
             return "1", 200  # Fail open on timeout
         except Exception as e:
-            logger.error(f"Error in query_ml: {str(e)}")
+            logger.error(f"Error in query_ml: {str(e)}", exc_info=True)
             return "1", 200  # Fail open on error
     elif request.method == 'GET':
         return "Service is up", 200
