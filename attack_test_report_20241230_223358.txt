@@ -1,0 +1,93 @@
+SQL Injection Detection Test Report
+==================================================
+Test Time: 2024-12-30 22:33:58.775307
+Target URL: http://127.0.0.1:5000
+--------------------------------------------------
+
+Summary:
+Total Tests: 16
+Attacks Detected: 9
+Detection Rate: 56.25%
+
+Detailed Results:
+--------------------------------------------------
+
+Pattern: ' OR '1'='1
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: 1' OR '1' = '1
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: 1 OR 1=1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' UNION SELECT username, password FROM users--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION ALL SELECT NULL,NULL,NULL--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' AND 1=CONVERT(int,(SELECT @@VERSION))--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' AND 1=db_name()--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '; WAITFOR DELAY '0:0:5'--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '; SLEEP(5)--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '; DROP TABLE users--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: '; DELETE FROM users--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 'x'='x' /*
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: admin'--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: 1' OR '1'='1' #
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: %27%20OR%20%271%27=%271
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: 1%27%20OR%20%271%27%20=%20%271
+Status Code: 200
+Detected: False
+------------------------------

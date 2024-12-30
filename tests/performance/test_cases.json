@@ -1,0 +1,76 @@
+{
+    "rules_test_cases": [
+        {
+            "name": "Basic SQLi",
+            "payload": {
+                "id": "1 OR 1=1"
+            },
+            "is_attack": true
+        },
+        {
+            "name": "UNION-based SQLi",
+            "payload": {
+                "id": "1 UNION SELECT 1,2,3"
+            },
+            "is_attack": true
+        },
+        {
+            "name": "Comment-based SQLi",
+            "payload": {
+                "id": "1; -- comment"
+            },
+            "is_attack": true
+        },
+        {
+            "name": "Normal Request 1",
+            "payload": {
+                "id": "123"
+            },
+            "is_attack": false
+        },
+        {
+            "name": "Normal Request 2",
+            "payload": {
+                "id": "user@example.com"
+            },
+            "is_attack": false
+        }
+    ],
+    "ml_test_cases": [
+        {
+            "name": "Obfuscated SQLi",
+            "payload": {
+                "id": "1/*!*/UnIoN/*!*/SeLeCt 1,2,3"
+            },
+            "is_attack": true
+        },
+        {
+            "name": "Encoded SQLi",
+            "payload": {
+                "id": "%53%45%4c%45%43%54%20%2a%20%46%52%4f%4d%20users"
+            },
+            "is_attack": true
+        },
+        {
+            "name": "Zero-day Style Attack",
+            "payload": {
+                "id": "CONCAT('SEL','ECT') FROM users"
+            },
+            "is_attack": true
+        },
+        {
+            "name": "Complex Normal Request 1",
+            "payload": {
+                "id": "John O'Connor Jr."
+            },
+            "is_attack": false
+        },
+        {
+            "name": "Complex Normal Request 2",
+            "payload": {
+                "id": "user+name@example-domain.com"
+            },
+            "is_attack": false
+        }
+    ]
+}
